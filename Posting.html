@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Data Chart</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin-top: 2rem;
+    }
+    canvas {
+      width: 500px !important;
+      height: 300px !important;
+    }
+  </style>
+</head>
+<body>
+  <h2>Live Chart from Python</h2>
+  <canvas id="liveChart" width="500" height="300"></canvas>
+
+  <script>
+    const ctx = document.getElementById("liveChart").getContext("2d");
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: Array(200).fill(""),
+        datasets: [{
+          label: "Live Data",
+          data: Array(200).fill(0),
+          borderColor: "rgb(75, 192, 192)",
+          tension: 0.2
+        }]
+      },
+      options: {
+        animation: false,
+        responsive: false,
+        scales: {
+          x: { display: false },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    async function updateChart() {
+      try {
+        const response = await fetch("http://127.0.0.1:5000/data");
+        const newData = await response.json();
+
+        chart.data.datasets[0].data.push(...newData);
+        chart.data.datasets[0].data.splice(0, newData.length);
+        chart.update();
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
+    }
+
+    setInterval(updateChart, 500); // update every 500 ms
+  </script>
+</body>
+</html>
