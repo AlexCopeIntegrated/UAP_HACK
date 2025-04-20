@@ -1,97 +1,74 @@
-print(">>> websocket_server_with_triple_plot.py loaded")
-
 import asyncio
-import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-import websockets
+from rtlsdr import RtlSdr
+import threading
 
-# Global buffer for latest samples
+# --- SDR Setup ---
+sdr = RtlSdr()
+sdr.sample_rate = 2.4e6   # Hz
+sdr.center_freq = 95e6    # Hz
+sdr.gain = 10             # dB
+
 latest_samples = np.zeros(1024, dtype=np.complex64)
+lock = threading.Lock()
 
-# --- WebSocket Handler ---
-async def send_samples(websocket, path=None):
+def read_sdr():
     global latest_samples
-    print("Client connected")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    try:
+    async def sdr_loop():
         while True:
-            # Generate mock complex I/Q samples
-            samples = (np.random.randn(1024) + 1j * np.random.randn(1024)).astype(np.complex64)
-            latest_samples = samples  # Update global buffer
+            samples = await sdr.read_samples(2048)
+            with lock:
+                latest_samples = samples
+            await asyncio.sleep(0.01)
 
-            # Send first 100 samples to client
-            flattened = np.empty(samples.size * 2, dtype=np.float32)
-            flattened[0::2] = samples.real
-            flattened[1::2] = samples.imag
-            message = {
-                "samples": flattened[:100].tolist()
-            }
-            await websocket.send(json.dumps(message))
-            await asyncio.sleep(0.1)
-    except websockets.exceptions.ConnectionClosed:
-        print("Client disconnected")
+    loop.run_until_complete(sdr_loop())
 
-# --- Matplotlib Plot Setup ---
-fig, axes = plt.subplots(3, 1, figsize=(10, 8), tight_layout=True)
+# --- Plot Setup ---
+fig, axs = plt.subplots(3, 1, figsize=(10, 8))
 
-# Power Spectrum
-ps_line, = axes[0].plot([], [], lw=1.5)
-axes[0].set_title("Power Spectrum")
-axes[0].set_xlabel("Frequency Bin")
-axes[0].set_ylabel("Power (dB)")
-axes[0].set_ylim(-50, 10)
-axes[0].set_xlim(0, 1024)
+line_time, = axs[0].plot([], [], lw=1)
+axs[0].set_title("Time Domain (Real)")
+axs[0].set_xlim(0, 1024)
+axs[0].set_ylim(-100, 100)
 
-# Time Domain Signal (Real Part)
-time_line, = axes[1].plot([], [], lw=1.5)
-axes[1].set_title("Time-Domain Signal (Real)")
-axes[1].set_xlabel("Sample Index")
-axes[1].set_ylabel("Amplitude")
-axes[1].set_ylim(-5, 5)
-axes[1].set_xlim(0, 1024)
+line_psd, = axs[1].plot([], [], lw=1)
+axs[1].set_title("Power Spectrum")
+axs[1].set_xlim(0, sdr.sample_rate/1e6)
+axs[1].set_ylim(-100, 0)
 
-# Constellation Diagram (I vs Q)
-constellation = axes[2].scatter([], [], s=10)
-axes[2].set_title("Constellation Diagram")
-axes[2].set_xlabel("In-Phase (I)")
-axes[2].set_ylabel("Quadrature (Q)")
-axes[2].set_xlim(-5, 5)
-axes[2].set_ylim(-5, 5)
+line_hist, = axs[2].plot([], [], lw=1)
+axs[2].set_title("Histogram of Real Component")
+axs[2].set_xlim(-150, 150)
+axs[2].set_ylim(0, 300)
 
-# --- Animation Function ---
-def update_plot(frame):
-    global latest_samples
-    if latest_samples.size == 0:
-        return ps_line, time_line, constellation
+def update(frame):
+    with lock:
+        samples = latest_samples.copy()
+    
+    if len(samples) == 0:
+        return
 
-    # Power spectrum
-    psd = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(latest_samples)))**2 + 1e-12)
-    ps_line.set_ydata(psd)
-    ps_line.set_xdata(np.arange(len(psd)))
+    # Time Domain
+    line_time.set_data(np.arange(len(samples)), samples.real)
 
-    # Time-domain (real)
-    time_line.set_ydata(latest_samples.real)
-    time_line.set_xdata(np.arange(len(latest_samples)))
+    # PSD
+    freqs, psd = plt.psd(samples, NFFT=1024, Fs=sdr.sample_rate/1e6, Fc=sdr.center_freq/1e6, visible=False)
+    line_psd.set_data(freqs, 10 * np.log10(psd))
 
-    # Constellation
-    constellation.set_offsets(np.column_stack((latest_samples.real, latest_samples.imag)))
+    # Histogram
+    hist, bins = np.histogram(samples.real, bins=100, range=(-150, 150))
+    line_hist.set_data(bins[:-1], hist)
 
-    return ps_line, time_line, constellation
+    return line_time, line_psd, line_hist
 
-# --- Start Plot Animation ---
-def start_plot():
-    ani = FuncAnimation(fig, update_plot, interval=200)
-    plt.show()
+# Start background SDR thread
+threading.Thread(target=read_sdr, daemon=True).start()
 
-# --- Async Main ---
-async def main():
-    server = websockets.serve(send_samples, "localhost", 8765)
-    print("Mock WebSocket server running at ws://localhost:8765")
-
-    await asyncio.gather(server, loop.run_in_executor(None, start_plot))
-
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+ani = FuncAnimation(fig, update, interval=200)
+plt.tight_layout()
+plt.show()
