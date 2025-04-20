@@ -1,0 +1,23 @@
+FROM python:3.9-slim-buster
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libusb-1.0-0-dev \
+    upx-ucl
+
+# Create working directory
+WORKDIR /app
+
+# Copy the application files
+COPY . /app/
+
+# Install Python dependencies
+RUN pip install -e .
+RUN pip install pyinstaller
+
+# Build the binary
+RUN pyinstaller rtlsdr_tool.spec --clean
+
+# Fix permissions
+RUN chmod +x dist/rtlsdr-tool

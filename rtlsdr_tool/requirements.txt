@@ -1,0 +1,2 @@
+numpy>=1.20.0
+pyrtlsdr>=0.2.9 
