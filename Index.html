@@ -1,36 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-Time RTL-SDR Data</title>
+  <meta charset="UTF-8">
+  <title>RTL-SDR Live I/Q Plot</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #plot { width: 100%; height: 500px; }
+  </style>
 </head>
 <body>
-    <h1>Real-Time RTL-SDR Data</h1>
-    <div id="data"></div>
+  <h2>RTL-SDR Live Streaming</h2>
+  <div id="plot"></div>
+  <p>Status: <span id="status">Connecting...</span></p>
 
-    <script>
-        const socket = new WebSocket('ws://localhost:8765'); // Connect to WebSocket server
+  <script>
+    const statusSpan = document.getElementById('status');
+    const socket = new WebSocket('ws://localhost:8765');
 
-        socket.onopen = function () {
-            console.log('Connected to WebSocket server');
-        };
+    socket.onopen = () => {
+      statusSpan.textContent = 'Connected';
+    };
 
-        socket.onmessage = function (event) {
-            const data = JSON.parse(event.data);
-            console.log('Received data:', data.samples);
+    socket.onclose = () => {
+      statusSpan.textContent = 'Disconnected';
+    };
 
-            // Display the first 10 samples (or however you'd like)
-            document.getElementById('data').innerText = data.samples.slice(0, 10).join(', ');
-        };
+    socket.onerror = (err) => {
+      statusSpan.textContent = 'Error';
+      console.error('WebSocket error:', err);
+    };
 
-        socket.onclose = function () {
-            console.log('Disconnected from WebSocket server');
-        };
+    Plotly.newPlot('plot', [{
+      x: Array.from({length: 50}, (_, i) => i),
+      y: Array(50).fill(0),
+      mode: 'lines',
+      line: { color: 'blue' },
+    }], {
+      margin: { t: 30 },
+      title: 'Real Part of I/Q Samples',
+      xaxis: { title: 'Sample Index' },
+      yaxis: { title: 'Amplitude' }
+    });
 
-        socket.onerror = function (error) {
-            console.error('WebSocket Error:', error);
-        };
-    </script>
+    socket.onmessage = function(event) {
+      const msg = JSON.parse(event.data);
+      const samples = msg.samples;
+
+      // Extract only real part from interleaved I/Q
+      const realPart = [];
+      for (let i = 0; i < samples.length; i += 2) {
+        realPart.push(samples[i]);
+      }
+
+      Plotly.update('plot', { y: [realPart] });
+    };
+  </script>
 </body>
 </html>
+
